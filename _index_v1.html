@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Audio QA CSV Builder</title>
+  <style>
+    :root{
+      --bg:#0b1020; --card:#121a33; --ink:#e8ecff; --muted:#98a2b3; --accent:#6ea8fe; --ok:#22c55e; --warn:#f59e0b; --border:#1f2a4a;
+    }
+    html,body{height:100%}
+    body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.4 system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, "Helvetica Neue", Arial, "Apple Color Emoji", "Segoe UI Emoji"}
+    .wrap{max-width:1100px;margin-inline:auto;padding:24px}
+    header{display:flex;gap:16px;align-items:center;justify-content:space-between;margin-bottom:18px}
+    .title{font-size:1.4rem;font-weight:700}
+    .card{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:16px}
+    .row{display:flex;gap:16px;flex-wrap:wrap}
+    .left{flex:1 1 320px}
+    .right{flex:2 1 520px}
+    label{display:block;margin-bottom:8px;color:var(--muted)}
+    input[type=file]{display:block;width:100%;padding:10px;background:#0f1731;border:1px dashed var(--border);border-radius:12px;color:var(--ink)}
+    .hint{color:var(--muted);font-size:0.9rem;margin-top:8px}
+    table{width:100%;border-collapse:separate;border-spacing:0 8px}
+    th,td{padding:10px 12px;text-align:left}
+    thead th{color:var(--muted);font-weight:600;border-bottom:1px solid var(--border)}
+    tbody tr{background:#0e1630;border:1px solid var(--border)}
+    tbody tr td:first-child{border-top-left-radius:12px;border-bottom-left-radius:12px}
+    tbody tr td:last-child{border-top-right-radius:12px;border-bottom-right-radius:12px}
+    .filename{font-weight:600}
+    .sub{display:block;color:var(--muted);font-size:0.85rem}
+    .controls{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
+    button{background:#111b39;color:var(--ink);border:1px solid var(--border);padding:10px 14px;border-radius:12px;cursor:pointer}
+    button.primary{background:var(--accent);border-color:var(--accent);color:#0a0a0a;font-weight:700}
+    button:disabled{opacity:.6;cursor:not-allowed}
+    .pill{background:#0c1430;border:1px solid var(--border);padding:6px 10px;border-radius:999px;color:var(--muted);font-size:0.85rem}
+    .audio-box{margin-top:10px}
+    .sticky-footer{position:sticky;bottom:0;background:linear-gradient(180deg, rgba(11,16,32,0) 0%, rgba(11,16,32,0.9) 30%, rgba(11,16,32,1) 100%);padding-top:8px}
+    .footer-card{display:flex;gap:12px;align-items:center;justify-content:space-between;background:var(--card);border:1px solid var(--border);border-radius:14px;padding:10px 12px}
+    .badge{background:#0f1a36;border:1px solid var(--border);padding:6px 10px;border-radius:999px}
+    .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);border:0}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div class="title">🎧 Audio QA CSV Builder</div>
+      <div class="pill" id="status">No files loaded</div>
+    </header>
+
+    <div class="row">
+      <section class="left card" aria-labelledby="upload-title">
+        <h2 id="upload-title" style="margin:0 0 8px 0;font-size:1.1rem">1) Choose a folder</h2>
+        <label for="folderInput">Upload .wav files (folder or multi-select)</label>
+        <!-- webkitdirectory enables directory selection in Chrome/Edge/Opera; Firefox allows multi-file but not dir picker yet -->
+        <input id="folderInput" type="file" webkitdirectory directory multiple accept=".wav,audio/wav" />
+        <div class="hint">Tip: Click once and select a folder (<em>Chrome-based browsers</em>) or multi-select files manually. Subfolders are supported.</div>
+
+        <div class="controls">
+          <button id="loadBtn" class="primary">Load WAV files</button>
+          <button id="clearBtn" title="Clear the current list">Clear</button>
+        </div>
+
+        <div class="audio-box">
+          <label for="preview">Preview</label>
+          <audio id="preview" controls preload="none" style="width:100%"></audio>
+        </div>
+      </section>
+
+      <section class="right card" aria-labelledby="review-title">
+        <h2 id="review-title" style="margin:0 0 8px 0;font-size:1.1rem">2) Review & label</h2>
+        <div class="controls">
+          <button id="markAllGood">Mark all good</button>
+          <button id="markAllBad">Mark all bad</button>
+          <span class="pill" id="counts">0 good / 0 total</span>
+        </div>
+
+        <div style="overflow:auto; max-height:60vh; margin-top:8px;">
+          <table aria-describedby="review-title">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>File</th>
+                <th>Preview</th>
+                <th>Good?</th>
+              </tr>
+            </thead>
+            <tbody id="fileTableBody">
+              <!-- rows injected -->
+            </tbody>
+          </table>
+        </div>
+
+        <div class="sticky-footer">
+          <div class="footer-card">
+            <span class="badge" id="footerCount">0 selected</span>
+            <div class="controls">
+              <button id="downloadCsvBtn" class="primary" disabled>Download CSV</button>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <script>
+    // State
+    const state = {
+      files: /** @type {{file: File, path: string, name: string, good: boolean}[]} */ ([])
+    };
+
+    const el = {
+      folderInput: document.getElementById('folderInput'),
+      loadBtn: document.getElementById('loadBtn'),
+      clearBtn: document.getElementById('clearBtn'),
+      tableBody: document.getElementById('fileTableBody'),
+      counts: document.getElementById('counts'),
+      footerCount: document.getElementById('footerCount'),
+      status: document.getElementById('status'),
+      downloadCsvBtn: document.getElementById('downloadCsvBtn'),
+      preview: document.getElementById('preview'),
+      markAllGood: document.getElementById('markAllGood'),
+      markAllBad: document.getElementById('markAllBad')
+    };
+
+    function resetState(){
+      state.files = [];
+      el.tableBody.innerHTML = '';
+      updateCounts();
+      el.status.textContent = 'No files loaded';
+      el.downloadCsvBtn.disabled = true;
+      el.preview.removeAttribute('src');
+      el.preview.load();
+    }
+
+    function humanRelPath(file){
+      // webkitRelativePath keeps the folder path if user chose a directory
+      // Fallback to file.name if empty (e.g., Firefox)
+      return file.webkitRelativePath || file.name;
+    }
+
+    function loadFiles(fileList){
+      const arr = Array.from(fileList || []);
+      const wavs = arr.filter(f => /\.wav$/i.test(f.name));
+      state.files = wavs.map((f) => ({
+        file: f,
+        path: humanRelPath(f),
+        name: f.name,
+        good: false
+      }));
+      renderTable();
+      updateCounts();
+      el.status.textContent = `${state.files.length} .wav file(s) loaded`;
+      el.downloadCsvBtn.disabled = state.files.length === 0;
+    }
+
+    function renderTable(){
+      el.tableBody.innerHTML = '';
+      state.files.forEach((item, idx) => {
+        const tr = document.createElement('tr');
+
+        const tdIdx = document.createElement('td');
+        tdIdx.textContent = String(idx + 1);
+
+        const tdName = document.createElement('td');
+        const strong = document.createElement('span');
+        strong.className = 'filename';
+        strong.textContent = item.name;
+        const sub = document.createElement('span');
+        sub.className = 'sub';
+        if(item.path !== item.name){ sub.textContent = item.path.replace(item.name, '').replace(/\/$/,''); }
+        tdName.appendChild(strong); tdName.appendChild(sub);
+
+        const tdPrev = document.createElement('td');
+        const playBtn = document.createElement('button');
+        playBtn.textContent = 'Play';
+        playBtn.addEventListener('click', () => previewFile(item.file));
+        tdPrev.appendChild(playBtn);
+
+        const tdGood = document.createElement('td');
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.checked = item.good;
+        cb.addEventListener('change', () => { item.good = cb.checked; updateCounts(); });
+        tdGood.appendChild(cb);
+
+        tr.appendChild(tdIdx);
+        tr.appendChild(tdName);
+        tr.appendChild(tdPrev);
+        tr.appendChild(tdGood);
+        el.tableBody.appendChild(tr);
+      });
+    }
+
+    function updateCounts(){
+      const total = state.files.length;
+      const good = state.files.filter(f => f.good).length;
+      el.counts.textContent = `${good} good / ${total} total`;
+      el.footerCount.textContent = `${good} marked good`;
+    }
+
+    function previewFile(file){
+      const url = URL.createObjectURL(file);
+      el.preview.src = url;
+      el.preview.play().catch(()=>{});
+      // Revoke after loaded to free memory
+      el.preview.onended = el.preview.onpause = () => {
+        URL.revokeObjectURL(url);
+      };
+    }
+
+    function downloadCSV(){
+      if(!state.files.length) return;
+      const header = 'filename,file good or bad\n';
+      const rows = state.files.map(({name, good}) => `${escapeCsv(name)},${good ? 'TRUE' : ''}`);
+      const csv = header + rows.join('\n');
+      const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'audios.csv';
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(()=>{
+        URL.revokeObjectURL(a.href);
+        a.remove();
+      }, 0);
+    }
+
+    function escapeCsv(value){
+      if(value == null) return '';
+      const v = String(value);
+      if(/[",\n]/.test(v)){
+        return '"' + v.replace(/"/g, '""') + '"';
+      }
+      return v;
+    }
+
+    // Events
+    el.loadBtn.addEventListener('click', () => loadFiles(el.folderInput.files));
+    el.clearBtn.addEventListener('click', resetState);
+    el.downloadCsvBtn.addEventListener('click', downloadCSV);
+    el.markAllGood.addEventListener('click', () => { state.files.forEach(f => f.good = true); renderTable(); updateCounts(); });
+    el.markAllBad.addEventListener('click', () => { state.files.forEach(f => f.good = false); renderTable(); updateCounts(); });
+
+    // Progressive enhancement: if user selects files, auto-load
+    el.folderInput.addEventListener('change', () => loadFiles(el.folderInput.files));
+  </script>
+</body>
+</html>

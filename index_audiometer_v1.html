@@ -68,14 +68,6 @@
           <button id="clearBtn" title="Clear the current list">Clear</button>
         </div>
 
-        <!-- CSV loader UI -->
-        <div class="controls">
-          <label for="csvInput" class="sr-only">Load existing CSV</label>
-          <input id="csvInput" type="file" accept=".csv,text/csv" />
-          <button id="loadCsvBtn" title="Load selections from CSV">Load CSV</button>
-        </div>
-        <div class="hint">Optionally load a previous <code>audios.csv</code> to restore your checks.</div>
-
         <div class="audio-box">
           <label for="preview">Preview</label>
           <audio id="preview" controls preload="none" style="width:100%"></audio>
@@ -132,8 +124,7 @@
   <script>
     // --- State ---
     const state = {
-      files: /** @type {{file: File, path: string, name: string, good: boolean}[]} */ ([]),
-      csvMap: new Map() // filename or relative path -> boolean
+      files: /** @type {{file: File, path: string, name: string, good: boolean}[]} */ ([])
     };
 
     // --- Elements ---
@@ -155,9 +146,6 @@
       rmsR: document.getElementById('rmsR'),
       peakL: document.getElementById('peakL'),
       peakR: document.getElementById('peakR'),
-      // CSV
-      csvInput: document.getElementById('csvInput'),
-      loadCsvBtn: document.getElementById('loadCsvBtn'),
     };
 
     function resetState(){
@@ -175,56 +163,6 @@
       return file.webkitRelativePath || file.name;
     }
 
-    // --- CSV helpers ---
-    function parseCsvText(text){
-      // returns Map<string, boolean>
-      const map = new Map();
-      const lines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
-      if (!lines.length) return map;
-
-      // detect header
-      const header = lines[0].trim().toLowerCase();
-      let start = 0;
-      if (header.includes('filename') && (header.includes('good') || header.includes('bad'))) {
-        start = 1;
-      }
-      for (let i = start; i < lines.length; i++){
-        const line = lines[i].trim();
-        if (!line) continue;
-
-        let name = '', val = '';
-        if (line.startsWith('"')){
-          const end = line.indexOf('",');
-          if (end >= 0){
-            name = line.slice(1, end).replace(/""/g, '"');
-            val  = line.slice(end + 2).trim();
-          } else continue;
-        } else {
-          const idx = line.indexOf(',');
-          if (idx < 0) continue;
-          name = line.slice(0, idx).trim();
-          val  = line.slice(idx + 1).trim();
-        }
-
-        const good = /^(true|1|yes)$/i.test(val); // treat TRUE/1/yes as true; else false/empty
-        map.set(name, good);
-      }
-      return map;
-    }
-
-    function applyCsvMapToState(){
-      if (!state.files.length || !state.csvMap.size) return;
-      for (const item of state.files){
-        const base = item.name;
-        const rel  = item.path || base;
-        if (state.csvMap.has(rel)) {
-          item.good = state.csvMap.get(rel);
-        } else if (state.csvMap.has(base)) {
-          item.good = state.csvMap.get(base);
-        }
-      }
-    }
-
     function loadFiles(fileList){
       const arr = Array.from(fileList || []);
       const wavs = arr.filter(f => /\.wav$/i.test(f.name) || /audio\/x?-?wav/i.test(f.type));
@@ -234,10 +172,6 @@
         name: f.name,
         good: false
       }));
-
-      // apply CSV selections if loaded already
-      applyCsvMapToState();
-
       renderTable();
       updateCounts();
       el.status.textContent = `${state.files.length} .wav file(s) loaded`;
@@ -334,25 +268,6 @@
     el.markAllBad.addEventListener('click', () => { state.files.forEach(f => f.good = false); renderTable(); updateCounts(); });
     el.folderInput.addEventListener('change', () => loadFiles(el.folderInput.files));
 
-    // CSV load events
-    el.loadCsvBtn.addEventListener('click', async () => {
-      const f = el.csvInput.files && el.csvInput.files[0];
-      if (!f) {
-        el.status.textContent = 'Pick a CSV file first.';
-        return;
-      }
-      try {
-        const text = await f.text();
-        state.csvMap = parseCsvText(text);
-        applyCsvMapToState();     // if WAVs are already loaded
-        renderTable();
-        updateCounts();
-        el.status.textContent = `Loaded selections from CSV (${state.csvMap.size} entries)`;
-      } catch (e) {
-        console.error('CSV load error:', e);
-        el.status.textContent = 'Failed to read CSV (see console).';
-      }
-    });
 
     // --- Meter math helpers ---
     function toDb(x){ return 20 * Math.log10(x + 1e-12); }  // dBFS
@@ -363,6 +278,8 @@
     const SMOOTH_MS = 250;           // RMS smoothing (ms)
     const UI_FPS = 10;               // number updates per second
     const PEAK_DECAY_DB_PER_SEC = 8; // peak-hold fall speed
+
+
 
     let audioCtx;                       // one context for the whole page
     const meterMap = new WeakMap();     // audioEl -> { analyserL, analyserR, rafId, smooth }
@@ -478,6 +395,8 @@
       el.rmsL.textContent = '–'; el.rmsR.textContent = '–';
       el.peakL.textContent = '–'; el.peakR.textContent = '–';
     }
+
+
   </script>
 </body>
 </html>
