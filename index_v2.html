@@ -290,32 +290,15 @@
     }
 
     // Preview + meter
-    let lastObjectUrl = null;
-
     function previewFile(file){
-      // Revoke previous URL (if any) before creating a new one
-      if (lastObjectUrl) {
-        try { URL.revokeObjectURL(lastObjectUrl); } catch {}
-        lastObjectUrl = null;
-      }
-
       const url = URL.createObjectURL(file);
-      lastObjectUrl = url;
       el.preview.src = url;
-
-      // Start playback + meter
       el.preview.play().catch(()=>{});
-      startMeter();
-
-      // Only revoke when we're done with this source or when replaced next time
-      el.preview.onended = () => {
-        if (lastObjectUrl) {
-          try { URL.revokeObjectURL(lastObjectUrl); } catch {}
-          lastObjectUrl = null;
-        }
-      };
+      startMeter(); // safe/reused context
+      const revoke = () => { URL.revokeObjectURL(url); };
+      el.preview.onended = revoke;
+      el.preview.onpause = revoke;
     }
-
 
     function downloadCSV(){
       if(!state.files.length) return;
@@ -370,34 +353,6 @@
         el.status.textContent = 'Failed to read CSV (see console).';
       }
     });
-
-    // Keep meters responsive during scrubbing
-    el.preview.addEventListener('seeking', () => {
-      // optional: visually zero while buffer is moving
-      el.barL.style.width = '0%';
-      el.barR.style.width = '0%';
-    });
-
-    el.preview.addEventListener('seeked', async () => {
-      // some browsers suspend context on user gestures
-      if (audioCtx && audioCtx.state === 'suspended') {
-        try { await audioCtx.resume(); } catch {}
-      }
-      // make sure the meter loop is active
-      startMeter();
-    });
-
-    el.preview.addEventListener('play', async () => {
-      if (audioCtx && audioCtx.state === 'suspended') {
-        try { await audioCtx.resume(); } catch {}
-      }
-      startMeter();
-    });
-    el.preview.addEventListener('ended', () => {
-      stopMeter();           // cancel RAF + zero UI
-    });
-
-
 
     // --- Meter math helpers ---
     function toDb(x){ return 20 * Math.log10(x + 1e-12); }  // dBFS
@@ -454,23 +409,13 @@
         const dtMs = now - lastTs;
         lastTs = now;
 
-        if (el.preview.ended) {
-        // Ended: zero meters but keep the loop alive (or call stopMeter() if you prefer)
-        el.barL.style.width = '0%';
-        el.barR.style.width = '0%';
-        el.rmsL.textContent = '–'; el.rmsR.textContent = '–';
-        el.peakL.textContent = '–'; el.peakR.textContent = '–';
-        cancelAnimationFrame(meter.rafId);
-        meter.rafId = 0;
-        return;
-        // continue; don't return, so scrubbing after end still revives if replayed
-      } else if (el.preview.paused) {
-        // Paused (often during seeking): show zero but keep RAF running
-        el.barL.style.width = '0%';
-        el.barR.style.width = '0%';
-        // no return here
-      }
-
+        if (el.preview.paused || el.preview.ended) {
+          el.barL.style.width = '0%';
+          el.barR.style.width = '0%';
+          el.rmsL.textContent = '–'; el.rmsR.textContent = '–';
+          el.peakL.textContent = '–'; el.peakR.textContent = '–';
+          return;
+        }
 
         meter.analyserL.getByteTimeDomainData(dataL);
         meter.analyserR.getByteTimeDomainData(dataR);
