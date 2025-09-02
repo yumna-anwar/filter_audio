@@ -68,10 +68,8 @@
           <button id="clearBtn" title="Clear the current list">Clear</button>
         </div>
 
-
         <!-- CSV loader UI -->
         <div class="controls">
-          <h2 id="upload-title" style="margin:0 0 8px 0;font-size:1.1rem"> Load Previously Saved CSV</h2>
           <label for="csvInput" class="sr-only">Load existing CSV</label>
           <input id="csvInput" type="file" accept=".csv,text/csv" />
           <button id="loadCsvBtn" title="Load selections from CSV">Load CSV</button>
@@ -112,7 +110,6 @@
                 <th>#</th>
                 <th>File</th>
                 <th>Preview</th>
-                <th>ΔRMS dB</th>
                 <th>Bad?</th>
               </tr>
             </thead>
@@ -235,8 +232,7 @@
         file: f,
         path: humanRelPath(f),
         name: f.name,
-        good: false,
-        rmsDiffDb: null 
+        good: false
       }));
 
       // apply CSV selections if loaded already
@@ -246,15 +242,6 @@
       updateCounts();
       el.status.textContent = `${state.files.length} .wav file(s) loaded`;
       el.downloadCsvBtn.disabled = state.files.length === 0;
-
-      // FOR RMS DIFFERENCE
-      for (const item of state.files) {
-        computeRmsDiffDb(item.file).then(v => {
-          item.rmsDiffDb = Number.isFinite(v) ? v : null;
-          renderTable(); // refresh table as values come in
-        });
-      }
-
     }
 
     function renderTable(){
@@ -280,18 +267,6 @@
         playBtn.addEventListener('click', () => previewFile(item.file));
         tdPrev.appendChild(playBtn);
 
-        // ΔRMS column
-        const tdRms = document.createElement('td');
-        if (Number.isFinite(item.rmsDiffDb)) {
-          const v = item.rmsDiffDb;
-          tdRms.textContent = (v >= 0 ? '+' : '') + v.toFixed(1);
-          tdRms.style.color = Math.abs(v) >= 3 ? 'var(--warn)' : 'var(--ink)';
-        } else {
-          tdRms.textContent = '—';
-          tdRms.style.color = 'var(--muted)';
-        }
-
-
         const tdGood = document.createElement('td');
         const cb = document.createElement('input');
         cb.type = 'checkbox';
@@ -302,7 +277,6 @@
         tr.appendChild(tdIdx);
         tr.appendChild(tdName);
         tr.appendChild(tdPrev);
-        tr.appendChild(tdRms);
         tr.appendChild(tdGood);
         el.tableBody.appendChild(tr);
       });
@@ -312,7 +286,7 @@
       const total = state.files.length;
       const good = state.files.filter(f => f.good).length;
       el.counts.textContent = `${good} good / ${total} total`;
-      el.footerCount.textContent = `${good} marked bad`;
+      el.footerCount.textContent = `${good} marked good`;
     }
 
     // Preview + meter
@@ -437,32 +411,6 @@
 
     let audioCtx;                       // one context for the whole page
     const meterMap = new WeakMap();     // audioEl -> { analyserL, analyserR, rafId, smooth }
-
-    // FOR RMS DIFFERENCE
-    function rmsOfChannel(arr){
-      let sum = 0;
-      for (let i = 0; i < arr.length; i++) sum += arr[i] * arr[i];
-      return Math.sqrt(sum / arr.length);
-    }
-
-    function toDb(x){ return 20 * Math.log10(x + 1e-12); }
-
-    async function computeRmsDiffDb(file){
-      try {
-        const buf = await file.arrayBuffer();
-        const ctx = (window.audioCtxForDecode ||= new (window.AudioContext || window.webkitAudioContext)());
-        const audioBuffer = await ctx.decodeAudioData(buf.slice(0));
-
-        if (audioBuffer.numberOfChannels < 2) return null;
-        const L = audioBuffer.getChannelData(0);
-        const R = audioBuffer.getChannelData(1);
-
-        return toDb(rmsOfChannel(L)) - toDb(rmsOfChannel(R));
-      } catch (e) {
-        console.warn('RMS diff error:', e);
-        return null;
-      }
-    }
 
     function startMeter(){
       if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
